@@ -16,8 +16,8 @@ MIDDLEWARE += ['debug_toolbar.middleware.DebugToolbarMiddleware']  # noqa: F405
 
 INTERNAL_IPS = ['127.0.0.1']
 
-# Relax CORS in development
-CORS_ALLOW_ALL_ORIGINS = True
+# Relax CORS in development — allow Vite dev server
+CORS_ALLOW_ALL_ORIGINS = True  # Overrides CORS_ALLOWED_ORIGINS in dev only
 
 # Show emails in console instead of sending them
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'

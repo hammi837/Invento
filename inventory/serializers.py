@@ -26,6 +26,7 @@ class ProductSerializer(serializers.ModelSerializer):
 class ProductForecastSerializer(serializers.ModelSerializer):
     # Inline product name so the frontend doesn't need a second request
     product_name = serializers.CharField(source='product_ref.name', read_only=True, default=None)
+    category = serializers.CharField(source='product_ref.category', read_only=True, default=None)
     stock_status = serializers.SerializerMethodField()
 
     class Meta:
@@ -34,6 +35,7 @@ class ProductForecastSerializer(serializers.ModelSerializer):
             'id',
             'product_id',
             'product_name',
+            'category',
             'forecast_date',
             'predicted_units',
             'current_stock',
@@ -44,7 +46,7 @@ class ProductForecastSerializer(serializers.ModelSerializer):
 
     def get_stock_status(self, obj):
         """
-        Returns a simple traffic-light status for the frontend to colour-code rows.
+        Traffic-light status based on days of stock remaining.
           critical  — stockout within 7 days
           warning   — stockout within 14 days
           ok        — more than 14 days of stock
