@@ -40,16 +40,21 @@ class MeView(APIView):
 
 class UserViewSet(viewsets.ModelViewSet):
     """
-    Admin-only CRUD on users.
-    GET    /api/users/           list
-    POST   /api/users/           create
-    GET    /api/users/<id>/      retrieve
-    PATCH  /api/users/<id>/      update
-    DELETE /api/users/<id>/      deactivate (soft)
-    POST   /api/users/<id>/deactivate/  toggle active
+    Admin-only full user lifecycle management.
+
+    GET    /api/users/                    list all users
+    POST   /api/users/                    create user
+    GET    /api/users/<id>/               retrieve user
+    PATCH  /api/users/<id>/               update user / reset password
+    DELETE /api/users/<id>/               hard delete (blocked for self)
+    POST   /api/users/<id>/deactivate/    disable login + employee flag
+    POST   /api/users/<id>/reactivate/    re-enable login + employee flag
     """
     queryset           = User.objects.all().order_by('date_joined')
     permission_classes = [IsAdmin]
+    filter_backends    = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields      = ['username', 'email', 'first_name', 'last_name']
+    ordering_fields    = ['date_joined', 'username', 'role']
 
     def get_serializer_class(self):
         if self.action == 'create':
@@ -58,19 +63,94 @@ class UserViewSet(viewsets.ModelViewSet):
             return UserUpdateSerializer
         return UserSerializer
 
-    def destroy(self, request, *args, **kwargs):
-        user = self.get_object()
-        user.is_active_employee = False
-        user.is_active = False
-        user.save()
-        return Response({'detail': 'User deactivated.'}, status=status.HTTP_200_OK)
+    # ── Create ──────────────────────────────
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        AuditLog.objects.create(
+            user=self.request.user,
+            action=AuditLog.Action.CREATE,
+            model_name='User',
+            object_id=instance.username,
+            details=f"Created user '{instance.username}' with role={instance.role}",
+        )
 
+    # ── Update ──────────────────────────────
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        # Self-lockout guard: admin cannot demote themselves
+        if instance.id == request.user.id and \
+           'role' in request.data and \
+           request.data['role'] != 'admin':
+            return Response(
+                {'error': 'You cannot change your own role away from Admin.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().update(request, *args, **kwargs)
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        AuditLog.objects.create(
+            user=self.request.user,
+            action=AuditLog.Action.UPDATE,
+            model_name='User',
+            object_id=instance.username,
+            details=f"Updated user '{instance.username}' — role={instance.role}, active={instance.is_active_employee}",
+        )
+
+    # ── Delete (hard) ────────────────────────
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        # Self-delete guard
+        if instance.id == request.user.id:
+            return Response(
+                {'error': 'You cannot delete your own account.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        AuditLog.objects.create(
+            user=request.user,
+            action=AuditLog.Action.DELETE,
+            model_name='User',
+            object_id=instance.username,
+            details=f"Hard-deleted user '{instance.username}' (was role={instance.role})",
+        )
+        return super().destroy(request, *args, **kwargs)
+
+    # ── Deactivate (soft disable) ────────────
     @action(detail=True, methods=['post'])
     def deactivate(self, request, pk=None):
         user = self.get_object()
-        user.is_active_employee = not user.is_active_employee
+        if user.id == request.user.id:
+            return Response(
+                {'error': 'You cannot deactivate your own account.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user.is_active_employee = False
+        user.is_active = False  # blocks JWT login
         user.save()
-        return Response({'is_active_employee': user.is_active_employee})
+        AuditLog.objects.create(
+            user=request.user,
+            action=AuditLog.Action.UPDATE,
+            model_name='User',
+            object_id=user.username,
+            details=f"Deactivated user '{user.username}'",
+        )
+        return Response({'status': 'deactivated', 'username': user.username})
+
+    # ── Reactivate ───────────────────────────
+    @action(detail=True, methods=['post'])
+    def reactivate(self, request, pk=None):
+        user = self.get_object()
+        user.is_active_employee = True
+        user.is_active = True
+        user.save()
+        AuditLog.objects.create(
+            user=request.user,
+            action=AuditLog.Action.UPDATE,
+            model_name='User',
+            object_id=user.username,
+            details=f"Reactivated user '{user.username}'",
+        )
+        return Response({'status': 'reactivated', 'username': user.username})
 
 
 # ─────────────────────────────────────────────
