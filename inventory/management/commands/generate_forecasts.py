@@ -3,7 +3,7 @@ import pandas as pd
 from pathlib import Path
 from django.core.management.base import BaseCommand
 from django.conf import settings
-from inventory.models import ProductForecast
+from inventory.models import Product, ProductForecast
 from datetime import datetime, timedelta
 
 
@@ -31,7 +31,13 @@ class Command(BaseCommand):
             return
 
         forecast_date = datetime.today() + timedelta(days=days_ahead)
-        self.stdout.write(f"Generating forecasts for {forecast_date.date()} ({len(model_files)} models found)\n")
+        self.stdout.write(
+            f"Generating forecasts for {forecast_date.date()} "
+            f"({len(model_files)} models found)\n"
+        )
+
+        # Pre-load all products into a dict for fast lookup
+        products = {p.product_id: p for p in Product.objects.all()}
 
         success_count = 0
         failed = []
@@ -49,12 +55,30 @@ class Command(BaseCommand):
                 forecast = model.predict(future)
                 predicted = max(0.0, float(forecast['yhat'].values[0]))
 
+                # Pull current stock from Product table if the product exists
+                product = products.get(product_id)
+                current_stock = product.current_stock if product else None
+
+                # days_until_stockout = current_stock / daily_demand
+                if current_stock is not None and predicted > 0:
+                    daily_demand = predicted / 7
+                    days_until_stockout = int(current_stock / daily_demand)
+                else:
+                    days_until_stockout = None
+
                 ProductForecast.objects.update_or_create(
                     product_id=product_id,
                     forecast_date=forecast_date.date(),
-                    defaults={'predicted_units': predicted},
+                    defaults={
+                        'product_ref': product,
+                        'predicted_units': predicted,
+                        'current_stock': current_stock,
+                        'days_until_stockout': days_until_stockout,
+                    },
                 )
-                self.stdout.write(f"  {product_id}: {predicted:.1f} units")
+
+                stock_info = f"stock={current_stock}, days_left={days_until_stockout}" if current_stock is not None else "no stock data"
+                self.stdout.write(f"  {product_id}: {predicted:.1f} units — {stock_info}")
                 success_count += 1
 
             except Exception as e:
