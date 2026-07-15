@@ -38,3 +38,6 @@ Thumbs.db
 
 # Logs folder contents (keep the folder, ignore log files)
 logs/*.log
+
+# Raw dataset files — regenerate from source, don't commit
+*.csv

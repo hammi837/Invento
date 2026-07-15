@@ -10,10 +10,10 @@ class Product(models.Model):
     CATEGORY_CHOICES = [
         ('electronics', 'Electronics'),
         ('clothing', 'Clothing'),
-        ('food', 'Food & Beverage'),
-        ('home', 'Home & Garden'),
+        ('food', 'Food & Groceries'),
+        ('home', 'Home & Furniture'),
         ('sports', 'Sports & Outdoors'),
-        ('other', 'Other'),
+        ('other', 'Toys & Other'),
     ]
 
     product_id = models.CharField(max_length=20, unique=True, db_index=True)
