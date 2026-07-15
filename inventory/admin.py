@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from .models import User, Product, ProductForecast
+from .models import User, Product, ProductForecast, AuditLog
 
 
 @admin.register(User)
@@ -40,3 +40,22 @@ class ProductForecastAdmin(admin.ModelAdmin):
     search_fields = ('product_id',)
     ordering      = ('-forecast_date',)
     readonly_fields = ('generated_at',)
+
+
+@admin.register(AuditLog)
+class AuditLogAdmin(admin.ModelAdmin):
+    list_display   = ('user', 'action', 'model_name', 'object_id', 'timestamp')
+    list_filter    = ('action', 'model_name', 'timestamp')
+    search_fields  = ('object_id', 'details')
+    ordering       = ('-timestamp',)
+    # Audit logs are immutable — no editing allowed
+    readonly_fields = [f.name for f in AuditLog._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

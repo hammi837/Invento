@@ -1,6 +1,7 @@
 Django>=5.0,<6.0
 djangorestframework>=3.14
 django-cors-headers>=4.3
+django-filter>=24.3
 prophet>=1.1
 pandas>=2.0
 joblib>=1.3

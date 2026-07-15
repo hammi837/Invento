@@ -3,9 +3,10 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
+from django_filters.rest_framework import DjangoFilterBackend
 
-from .models import Product, ProductForecast, User
-from .serializers import ProductSerializer, ProductForecastSerializer
+from .models import Product, ProductForecast, AuditLog, User
+from .serializers import ProductSerializer, ProductForecastSerializer, AuditLogSerializer
 from .auth_serializers import (
     CustomTokenObtainPairSerializer,
     UserSerializer,
@@ -17,21 +18,20 @@ from .permissions import IsAdmin, IsManagerOrAdmin, IsAnyRole, ReadOnlyOrManager
 
 
 # ─────────────────────────────────────────────
-# Auth views
+# Auth
 # ─────────────────────────────────────────────
 
 class CustomTokenObtainPairView(TokenObtainPairView):
-    """POST /api/auth/login/ — returns access, refresh, role, username."""
+    """POST /api/auth/login/"""
     serializer_class = CustomTokenObtainPairSerializer
 
 
 class MeView(APIView):
-    """GET /api/auth/me/ — returns the current user's profile."""
+    """GET /api/auth/me/"""
     permission_classes = [IsAnyRole]
 
     def get(self, request):
-        serializer = MeSerializer(request.user)
-        return Response(serializer.data)
+        return Response(MeSerializer(request.user).data)
 
 
 # ─────────────────────────────────────────────
@@ -41,14 +41,14 @@ class MeView(APIView):
 class UserViewSet(viewsets.ModelViewSet):
     """
     Admin-only CRUD on users.
-    GET    /api/users/          — list all users
-    POST   /api/users/          — create user
-    GET    /api/users/<id>/     — retrieve user
-    PATCH  /api/users/<id>/     — update user
-    DELETE /api/users/<id>/     — deactivate user (soft delete)
-    POST   /api/users/<id>/deactivate/ — toggle is_active_employee
+    GET    /api/users/           list
+    POST   /api/users/           create
+    GET    /api/users/<id>/      retrieve
+    PATCH  /api/users/<id>/      update
+    DELETE /api/users/<id>/      deactivate (soft)
+    POST   /api/users/<id>/deactivate/  toggle active
     """
-    queryset = User.objects.all().order_by('date_joined')
+    queryset           = User.objects.all().order_by('date_joined')
     permission_classes = [IsAdmin]
 
     def get_serializer_class(self):
@@ -59,7 +59,6 @@ class UserViewSet(viewsets.ModelViewSet):
         return UserSerializer
 
     def destroy(self, request, *args, **kwargs):
-        # Soft-delete: deactivate instead of hard delete
         user = self.get_object()
         user.is_active_employee = False
         user.is_active = False
@@ -75,61 +74,95 @@ class UserViewSet(viewsets.ModelViewSet):
 
 
 # ─────────────────────────────────────────────
-# Product views
+# Products (Phase 2 — full CRUD + audit log)
 # ─────────────────────────────────────────────
 
-class ProductListView(generics.ListCreateAPIView):
+class ProductViewSet(viewsets.ModelViewSet):
     """
-    GET    /api/products/  — list products (all roles)
-    POST   /api/products/  — create product (manager/admin only)
+    GET    /api/products/           list    (all roles)
+    POST   /api/products/           create  (manager / admin)
+    GET    /api/products/<id>/      detail  (all roles)
+    PATCH  /api/products/<id>/      update  (manager / admin)
+    DELETE /api/products/<id>/      delete  (admin only)
+
+    Filters:  ?category=electronics
+    Search:   ?search=laptop
+    Ordering: ?ordering=current_stock
     """
+    queryset           = Product.objects.all().order_by('product_id')
     serializer_class   = ProductSerializer
     permission_classes = [ReadOnlyOrManagerAbove]
-    filter_backends    = [filters.OrderingFilter, filters.SearchFilter]
-    ordering_fields    = ['product_id', 'current_stock', 'name', 'category']
-    search_fields      = ['product_id', 'name']
-    ordering           = ['product_id']
+    filter_backends    = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields   = ['category', 'is_active']
+    search_fields      = ['name', 'product_id']
+    ordering_fields    = ['product_id', 'current_stock', 'price', 'name']
 
-    def get_queryset(self):
-        queryset     = Product.objects.filter(is_active=True)
-        category     = self.request.query_params.get('category')
-        needs_reorder = self.request.query_params.get('needs_reorder')
-        if category:
-            queryset = queryset.filter(category=category)
-        if needs_reorder and needs_reorder.lower() == 'true':
-            from django.db.models import F
-            queryset = queryset.filter(current_stock__lte=F('reorder_point'))
-        return queryset
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        AuditLog.objects.create(
+            user=self.request.user,
+            action=AuditLog.Action.CREATE,
+            model_name='Product',
+            object_id=instance.product_id,
+            details=f"Created '{instance.name}' — stock: {instance.current_stock}",
+        )
 
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        AuditLog.objects.create(
+            user=self.request.user,
+            action=AuditLog.Action.UPDATE,
+            model_name='Product',
+            object_id=instance.product_id,
+            details=f"Updated '{instance.name}' — stock: {instance.current_stock}, price: {instance.price}",
+        )
 
-class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
-    """
-    GET    /api/products/<product_id>/  — retrieve (all roles)
-    PATCH  /api/products/<product_id>/  — update  (manager/admin)
-    DELETE /api/products/<product_id>/  — delete  (admin only)
-    """
-    queryset           = Product.objects.all()
-    serializer_class   = ProductSerializer
-    permission_classes = [ReadOnlyOrManagerAbove]
-    lookup_field       = 'product_id'
+    def perform_destroy(self, instance):
+        AuditLog.objects.create(
+            user=self.request.user,
+            action=AuditLog.Action.DELETE,
+            model_name='Product',
+            object_id=instance.product_id,
+            details=f"Deleted '{instance.name}'",
+        )
+        instance.delete()
 
     def destroy(self, request, *args, **kwargs):
         if request.user.role != 'admin':
             return Response(
                 {'detail': 'Only admins can delete products.'},
-                status=status.HTTP_403_FORBIDDEN
+                status=status.HTTP_403_FORBIDDEN,
             )
         return super().destroy(request, *args, **kwargs)
 
 
 # ─────────────────────────────────────────────
-# Forecast views
+# Audit log (Manager / Admin read-only)
+# ─────────────────────────────────────────────
+
+class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    GET /api/audit-logs/        list  (manager / admin)
+    GET /api/audit-logs/<id>/   detail
+
+    Filters:  ?action=create  ?model_name=Product
+    Ordering: ?ordering=-timestamp
+    """
+    queryset           = AuditLog.objects.select_related('user').all()
+    serializer_class   = AuditLogSerializer
+    permission_classes = [IsManagerOrAdmin]
+    filter_backends    = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields   = ['action', 'model_name']
+    ordering_fields    = ['timestamp']
+    ordering           = ['-timestamp']
+
+
+# ─────────────────────────────────────────────
+# Forecasts
 # ─────────────────────────────────────────────
 
 class ProductForecastListView(generics.ListAPIView):
-    """
-    GET /api/forecasts/  — all roles can view forecasts.
-    """
+    """GET /api/forecasts/  — all roles."""
     serializer_class   = ProductForecastSerializer
     permission_classes = [IsAnyRole]
     filter_backends    = [filters.OrderingFilter]
