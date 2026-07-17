@@ -172,6 +172,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     queryset           = Product.objects.all().order_by('product_id')
     serializer_class   = ProductSerializer
     permission_classes = [ReadOnlyOrManagerAbove]
+    pagination_class   = None   # Return all products — frontend handles display
     filter_backends    = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields   = ['category', 'is_active']
     search_fields      = ['name', 'product_id']
@@ -224,27 +225,22 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     """
     GET /api/audit-logs/        list  (manager / admin)
     GET /api/audit-logs/<id>/   detail
-
-    Filters:  ?action=create  ?model_name=Product
-    Ordering: ?ordering=-timestamp
     """
     queryset           = AuditLog.objects.select_related('user').all()
     serializer_class   = AuditLogSerializer
     permission_classes = [IsManagerOrAdmin]
+    pagination_class   = None
     filter_backends    = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields   = ['action', 'model_name']
     ordering_fields    = ['timestamp']
     ordering           = ['-timestamp']
 
 
-# ─────────────────────────────────────────────
-# Forecasts
-# ─────────────────────────────────────────────
-
 class ProductForecastListView(generics.ListAPIView):
     """GET /api/forecasts/  — all roles."""
     serializer_class   = ProductForecastSerializer
     permission_classes = [IsAnyRole]
+    pagination_class   = None
     filter_backends    = [filters.OrderingFilter]
     ordering_fields    = ['forecast_date', 'predicted_units', 'product_id', 'days_until_stockout']
     ordering           = ['-forecast_date']

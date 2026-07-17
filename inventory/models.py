@@ -57,6 +57,7 @@ class Product(models.Model):
     price         = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     current_stock = models.IntegerField(default=0)
     reorder_point = models.IntegerField(default=0, help_text='Stock level that triggers a reorder alert')
+    image         = models.ImageField(upload_to='products/', null=True, blank=True)
     is_active     = models.BooleanField(default=True)
     created_at    = models.DateTimeField(auto_now_add=True)
     updated_at    = models.DateTimeField(auto_now=True)

@@ -1,37 +1,49 @@
-# Invento — AI-Powered Inventory Management System
+# Invento — Backend API
 
-![Python](https://img.shields.io/badge/Python-3.13-blue?logo=python)
-![Django](https://img.shields.io/badge/Django-5.2-092E20?logo=django)
-![DRF](https://img.shields.io/badge/DRF-3.17-red?logo=django)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?logo=postgresql)
-![Prophet](https://img.shields.io/badge/Prophet-1.3-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.13-3776AB?style=for-the-badge&logo=python&logoColor=white" />
+  <img src="https://img.shields.io/badge/Django-5.2-092E20?style=for-the-badge&logo=django&logoColor=white" />
+  <img src="https://img.shields.io/badge/DRF-3.17-FF1709?style=for-the-badge&logo=django&logoColor=white" />
+  <img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" />
+  <img src="https://img.shields.io/badge/Prophet-1.3-0066CC?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/JWT-Auth-black?style=for-the-badge&logo=jsonwebtokens" />
+  <img src="https://img.shields.io/badge/License-MIT-22c55e?style=for-the-badge" />
+</p>
 
-AI-powered inventory management system with weekly demand forecasting. Django + PostgreSQL backend with 20 trained Facebook Prophet time-series models predicting weekly product demand (avg. 14.35% MAPE).
+<p align="center">
+  <strong>Django REST API powering an AI-driven inventory management system.</strong><br/>
+  Role-based access control · Facebook Prophet demand forecasting · Full audit trail · JWT authentication
+</p>
 
 ---
 
-## Features
+## What This Is
 
-- **Demand Forecasting** — 20 per-product Prophet models predicting weekly units sold
-- **REST API** — DRF endpoints consumed by the React frontend
-- **Stock Alert Logic** — days-until-stockout calculation per product
-- **Django Admin** — full CRUD visibility into forecast data
-- **Production-Ready** — split settings (dev/prod), WhiteNoise, Sentry, HTTPS headers
-- **Management Command** — `generate_forecasts` regenerates all 20 forecasts in one command
+Invento's backend is a production-grade Django REST Framework API that sits between a React frontend and a machine learning layer. It handles:
+
+- **Authentication** — JWT-based login with role claims embedded in tokens (Admin / Manager / Staff)
+- **Authorization** — Custom DRF permission classes enforce role rules server-side on every endpoint
+- **Demand Forecasting** — 20 trained Facebook Prophet models predict weekly product demand; forecasts are pre-computed and stored in PostgreSQL (not generated per request)
+- **Audit Logging** — Every create/update/delete is recorded with user, timestamp, and details — immutable and visible to Manager+ roles
+- **User Management** — Admin-only CRUD on users with self-lockout protection (can't delete/demote your own account)
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Backend | Django 5.2, Django REST Framework |
-| Database | PostgreSQL |
-| ML / Forecasting | Facebook Prophet, pandas, joblib |
-| Frontend | React (separate repo) |
-| Auth | Django session + token auth |
-| Deployment | Gunicorn + Nginx (AWS) |
+| Layer | Technology | Purpose |
+|---|---|---|
+| Web framework | Django 5.2 | Core application, ORM, admin |
+| API | Django REST Framework 3.17 | REST endpoints, serializers, viewsets |
+| Auth | djangorestframework-simplejwt 5.4 | JWT access + refresh tokens |
+| Database | PostgreSQL 16 | Primary data store |
+| ML / Forecasting | Facebook Prophet 1.3 | Per-product time-series demand forecasting |
+| Data processing | pandas, joblib | Model serving and data preparation |
+| Filtering | django-filter 24.3 | Query param filtering on list endpoints |
+| Config | python-decouple | Environment-based secrets management |
+| Production server | Gunicorn + Nginx | WSGI serving |
+| Static files | WhiteNoise | Production static file serving |
+| Error tracking | Sentry (production) | Exception monitoring |
 
 ---
 
@@ -41,29 +53,90 @@ AI-powered inventory management system with weekly demand forecasting. Django + 
 inventory-system/
 ├── core/
 │   ├── settings/
-│   │   ├── base.py          # shared config
-│   │   ├── development.py   # debug toolbar, relaxed CORS
-│   │   └── production.py    # HTTPS, WhiteNoise, Sentry
+│   │   ├── base.py           # Shared config: DB, DRF, CORS, logging, JWT
+│   │   ├── development.py    # Debug toolbar, relaxed CORS, SQLite fallback
+│   │   └── production.py     # HTTPS enforcement, WhiteNoise, Sentry
 │   ├── urls.py
 │   ├── wsgi.py
 │   └── asgi.py
 ├── inventory/
-│   ├── management/commands/
-│   │   └── generate_forecasts.py   # runs all 20 Prophet models
-│   ├── migrations/
-│   ├── ml_models/           # .pkl files go here (not in git)
-│   ├── models.py            # ProductForecast model
-│   ├── serializers.py
-│   ├── views.py
-│   └── urls.py
+│   ├── models.py             # User, Product, ProductForecast, AuditLog
+│   ├── serializers.py        # Product + Forecast serializers with validation
+│   ├── auth_serializers.py   # JWT + User CRUD serializers
+│   ├── permissions.py        # IsAdmin, IsManagerOrAdmin, ReadOnlyOrManagerAbove
+│   ├── views.py              # ViewSets and API views
+│   ├── urls.py               # App-level URL routing
+│   ├── admin.py              # Django admin (immutable AuditLog)
+│   ├── management/
+│   │   └── commands/
+│   │       ├── generate_forecasts.py   # Load .pkl → predict → write to DB
+│   │       └── seed_products.py        # Seed 20 products from dataset
+│   └── ml_models/            # Trained Prophet .pkl files (git-ignored)
 ├── requirements/
-│   ├── base.txt
-│   ├── development.txt
-│   └── production.txt
+│   ├── base.txt              # Shared dependencies
+│   ├── development.txt       # + debug toolbar
+│   └── production.txt        # + whitenoise, sentry
 ├── logs/
 ├── .env.example
 └── manage.py
 ```
+
+---
+
+## Data Models
+
+### User *(extends AbstractUser)*
+Custom user model with `role` (admin/manager/staff), `phone`, and `is_active_employee`. Defined before the first migration — Django cannot swap the User model after migrations run.
+
+### Product
+Business-facing product record: `product_id` (e.g. P0001), `name`, `category`, `price`, `current_stock`, `reorder_point`.
+
+### ProductForecast
+ML output table — one row per product per forecast date. Holds `predicted_units`, `current_stock` snapshot, `days_until_stockout`, and a derived `stock_status` (critical / warning / ok). The API reads from here; forecasts are pre-computed on a schedule.
+
+### AuditLog
+Immutable action log: `user`, `action` (create/update/delete), `model_name`, `object_id`, `details`, `timestamp`. Written on every mutating action across Products and Users.
+
+---
+
+## Role-Based Access Control
+
+| Endpoint | Staff | Manager | Admin |
+|---|---|---|---|
+| `GET /api/products/` | ✅ | ✅ | ✅ |
+| `POST /api/products/` | ❌ | ✅ | ✅ |
+| `PATCH /api/products/{id}/` | ❌ | ✅ | ✅ |
+| `DELETE /api/products/{id}/` | ❌ | ❌ | ✅ |
+| `GET /api/forecasts/` | ✅ | ✅ | ✅ |
+| `GET /api/audit-logs/` | ❌ | ✅ | ✅ |
+| `GET /api/users/` | ❌ | ❌ | ✅ |
+| `POST /api/users/` | ❌ | ❌ | ✅ |
+| `POST /api/users/{id}/deactivate/` | ❌ | ❌ | ✅ |
+
+Permission is enforced **server-side** on every request — UI hiding is a UX convenience, not a security boundary.
+
+---
+
+## API Endpoints
+
+| Method | Endpoint | Access | Description |
+|---|---|---|---|
+| `POST` | `/api/auth/login/` | Public | Obtain JWT tokens + role |
+| `POST` | `/api/auth/refresh/` | Public | Refresh access token |
+| `GET` | `/api/auth/me/` | Any role | Current user profile |
+| `GET` | `/api/products/` | Staff+ | List products (filter, search, order) |
+| `POST` | `/api/products/` | Manager+ | Create product |
+| `PATCH` | `/api/products/{id}/` | Manager+ | Update product |
+| `DELETE` | `/api/products/{id}/` | Admin | Delete product |
+| `GET` | `/api/forecasts/` | Staff+ | Demand forecasts with stock status |
+| `GET` | `/api/audit-logs/` | Manager+ | Immutable action history |
+| `GET` | `/api/users/` | Admin | List users |
+| `POST` | `/api/users/` | Admin | Create user |
+| `PATCH` | `/api/users/{id}/` | Admin | Update user / reset password |
+| `POST` | `/api/users/{id}/deactivate/` | Admin | Soft-disable login |
+| `POST` | `/api/users/{id}/reactivate/` | Admin | Re-enable login |
+
+All list endpoints support `?search=`, `?ordering=`, and `django-filter` query params.
 
 ---
 
@@ -72,20 +145,16 @@ inventory-system/
 ### Prerequisites
 - Python 3.10+
 - PostgreSQL 14+
-- Git
 
-### 1. Clone and create virtual environment
+### 1. Clone and activate virtual environment
 
 ```bash
 git clone https://github.com/hammi837/Invento.git
 cd Invento
+
 python -m venv venv
-
-# Windows
-venv\Scripts\activate
-
-# Mac/Linux
-source venv/bin/activate
+venv\Scripts\activate        # Windows
+source venv/bin/activate     # Mac/Linux
 ```
 
 ### 2. Install dependencies
@@ -97,11 +166,11 @@ pip install -r requirements/development.txt
 ### 3. Configure environment
 
 ```bash
-copy .env.example .env   # Windows
-cp .env.example .env     # Mac/Linux
+copy .env.example .env    # Windows
+cp .env.example .env      # Mac/Linux
 ```
 
-Edit `.env` with your PostgreSQL credentials:
+Fill in `.env`:
 
 ```env
 SECRET_KEY=your-secret-key-here
@@ -114,120 +183,111 @@ DB_PASSWORD=yourpassword
 DB_HOST=localhost
 DB_PORT=5432
 
-CORS_ALLOWED_ORIGINS=http://localhost:3000
+CORS_ALLOWED_ORIGINS=http://localhost:5173
 ```
 
-### 4. Create the database
+### 4. Create database and run migrations
 
 ```bash
 createdb inventory
-```
-
-### 5. Run migrations and create superuser
-
-```bash
 python manage.py migrate
-python manage.py createsuperuser
 ```
 
-### 6. Add ML models and generate forecasts
-
-Place your trained `.pkl` files in `inventory/ml_models/` then:
+### 5. Seed demo data
 
 ```bash
+# Create default users (admin / manager / staff)
+python manage.py seed_products
+
+# Place .pkl model files in inventory/ml_models/, then:
 python manage.py generate_forecasts
-# or forecast 14 days ahead:
-python manage.py generate_forecasts --days-ahead 14
 ```
 
-### 7. Start the dev server
+### 6. Create superuser and start server
 
 ```bash
+python manage.py createsuperuser
 python manage.py runserver
 ```
 
-- API: http://127.0.0.1:8000/api/forecasts/
-- Admin: http://127.0.0.1:8000/admin/
-
----
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/api/forecasts/` | All forecasts (paginated) |
-| GET | `/api/forecasts/?product_id=P0001` | Filter by product |
-| GET | `/api/forecasts/?ordering=forecast_date` | Sort by date |
-| GET | `/api/forecasts/<id>/` | Single forecast record |
-
-### Example response
-
-```json
-{
-  "count": 20,
-  "next": null,
-  "previous": null,
-  "results": [
-    {
-      "id": 1,
-      "product_id": "P0001",
-      "forecast_date": "2026-07-22",
-      "predicted_units": 612.3,
-      "current_stock": null,
-      "days_until_stockout": null,
-      "generated_at": "2026-07-15T14:00:00Z"
-    }
-  ]
-}
-```
+| URL | Purpose |
+|---|---|
+| `http://127.0.0.1:8000/api/` | REST API root |
+| `http://127.0.0.1:8000/admin/` | Django admin |
 
 ---
 
 ## ML Models
 
-The trained Prophet forecasting models (`.pkl` files) are **not included** in this repository, following standard ML engineering practice — model artifacts are regenerable outputs of the training code, not source code themselves.
+Trained `.pkl` files are **not committed to Git** — model artifacts are regenerable build outputs, not source code. Committing them would bloat repository history permanently.
 
-### To regenerate the models
+### Regenerating models
 
 1. Open `notebooks/train_models.ipynb` in Google Colab or Jupyter
-2. Upload the dataset: `retail_store_inventory.csv`
-   ([source dataset](https://www.kaggle.com/datasets/anirudhchauhan/retail-store-inventory-forecasting-dataset))
-3. Run all cells — trains 20 Prophet models (one per product) and saves them as `.pkl` files
-4. Download the generated models and place them in `inventory/ml_models/`
+2. Upload `retail_store_inventory.csv` — [Kaggle dataset](https://www.kaggle.com/datasets/anirudhchauhan/retail-store-inventory-forecasting-dataset)
+3. Run all cells — trains one Prophet model per product, saves as `.pkl`
+4. Copy generated files into `inventory/ml_models/`
+5. Run `python manage.py generate_forecasts`
 
 ### Model performance
 
-**Average MAPE of 14.35%** across 20 products on held-out test data (weekly demand forecasting).
-
 | Metric | Value |
 |---|---|
-| Avg MAPE | 14.35% |
-| Best product | P0014 (8.42% MAPE) |
-| Worst product | P0008 (20.77% MAPE) |
-| Forecast granularity | Weekly |
-| Model type | Facebook Prophet (per-product) |
+| Average MAPE | **14.35%** |
+| Best product | P0014 — 8.42% MAPE |
+| Worst product | P0008 — 20.77% MAPE |
+| Granularity | Weekly demand |
+| Architecture | One independent Prophet model per product |
+
+Weekly granularity was chosen after testing daily (MAPE ~36%) — weekly aggregation reduces noise and matches how real restocking decisions are made.
 
 ---
 
-## Running in Production
+## Demo Credentials
+
+| Username | Password | Role |
+|---|---|---|
+| `admin` | `Admin1234!` | Full access — users, products, audit log |
+| `manager` | `Manager1234!` | Products CRUD, audit log — no user management |
+| `staff` | `Staff1234!` | Read-only — forecasts and products |
+
+---
+
+## Production Deployment
 
 ```bash
-# Install production dependencies
 pip install -r requirements/production.txt
 
-# Set environment variable
-set DJANGO_SETTINGS_MODULE=core.settings.production   # Windows
-export DJANGO_SETTINGS_MODULE=core.settings.production # Mac/Linux
+# Windows
+set DJANGO_SETTINGS_MODULE=core.settings.production
 
-# Collect static files
+# Mac/Linux
+export DJANGO_SETTINGS_MODULE=core.settings.production
+
 python manage.py collectstatic --noinput
-
-# Start Gunicorn
 gunicorn core.wsgi:application --bind 0.0.0.0:8000 --workers 3
 ```
 
 ---
 
+## Planned Features
+
+- [ ] LLM Daily Brief — plain-English inventory summary generated from forecast data
+- [ ] Purchase Order Draft + Approval Queue — AI proposes, Manager/Admin approves
+- [ ] Conversational Q&A endpoint — RAG-style: Django fetches context, LLM answers
+- [ ] Automated test suite — permission coverage + forecast edge cases
+- [ ] OpenAPI/Swagger docs via `drf-spectacular`
+- [ ] Rate limiting on auth endpoints
+- [ ] Celery Beat scheduled forecast regeneration
+
+---
+
+## Related Repos
+
+- **Frontend**: [hammi837/Invento-FE](https://github.com/hammi837/Invento-FE) — React dashboard
+
+---
+
 ## License
 
-MIT
+MIT © 2026 Hammad

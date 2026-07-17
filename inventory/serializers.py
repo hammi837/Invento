@@ -4,15 +4,24 @@ from .models import Product, ProductForecast, AuditLog
 
 class ProductSerializer(serializers.ModelSerializer):
     needs_reorder = serializers.BooleanField(read_only=True)
+    image_url = serializers.SerializerMethodField()
 
     class Meta:
         model  = Product
         fields = [
             'id', 'product_id', 'name', 'category', 'price',
             'current_stock', 'reorder_point', 'needs_reorder',
-            'is_active', 'created_at', 'updated_at',
+            'image', 'image_url', 'is_active', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_image_url(self, obj):
+        if obj.image:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.image.url)
+            return obj.image.url
+        return None
 
     def validate_current_stock(self, value):
         if value < 0:
@@ -28,6 +37,10 @@ class ProductSerializer(serializers.ModelSerializer):
         if value < 0:
             raise serializers.ValidationError("Reorder point cannot be negative.")
         return value
+
+    def validate_product_id(self, value):
+        # Always uppercase product_id — P0021 not p0021
+        return value.strip().upper()
 
 
 class ProductForecastSerializer(serializers.ModelSerializer):
